@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 )
@@ -19,9 +20,13 @@ func main() {
 		"request timed out",
 	)
 
-	// Start the server on port 8080
-	fmt.Println("Server starting on :8080...")
-	http.ListenAndServe(":8080", handler)
+	// Start the server on the PORT environment variable or default to 8080
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	fmt.Printf("Server starting on :%s...\n", port)
+	http.ListenAndServe(":"+port, handler)
 }
 
 //--- logic ---
