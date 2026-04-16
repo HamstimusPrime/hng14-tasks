@@ -15,7 +15,7 @@ import (
 func main() {
 
 	DB_URL := os.Getenv("DB_URL")
-	log.Panicf("sql URL is %v", DB_URL)
+	log.Printf("logging... %v\n", DB_URL)
 	db, err := sql.Open("postgres", DB_URL)
 	if err != nil {
 		log.Fatalf("unable to establish connection to database: %v", err)
