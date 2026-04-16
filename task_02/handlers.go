@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"hng_task_02/internal/database"
 	"net/http"
@@ -20,10 +22,17 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 
 	var dbUser database.User
 	var createUserObj userProfile
-	dbUser, err = q.GetUserByName(context.Background(), nameParam)
+	dbUser, err = q.GetProfileByName(context.Background(), nameParam)
 	if err != nil {
-		fmt.Println("error fetching user by name")
-		return
+		if errors.Is(err, sql.ErrNoRows) {
+			// continue to create profile with name if name not found in DB
+			fmt.Println("user does not exist, continuing...")
+		} else {
+			// Real error — stop execution
+			fmt.Printf("error fetching profile by name err: %v", err)
+			respondWithError(w, 500, "internal server Error")
+			return
+		}
 	}
 
 	if dbUser.Name == nameParam {
@@ -44,7 +53,6 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 			CreatedAt:          dbUser.CreatedAt.Time,
 		}
 
-		//---respond with JSON
 		respondWithJSON(w, createUserObj, 420)
 		return
 	}
@@ -54,33 +62,51 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 	if err != nil {
 		return
 	}
+	//if Genderize returns gender: null or count: 0 → return 502, do not store
+	if (genderizeData.Gender == "") || (genderizeData.Count == 0) {
+		respondWithError(w, 502, fmt.Sprintf("%v returned an invalid response", GENDERIZE_API_URL))
+		return
+	}
+
 	//--- fetch agifyAPI ---
 	agifyData, err := fetchDataFromAPI[AgifyResponse](AGIFY_API_URL, nameParam, w)
 	if err != nil {
 		return
 	}
+	// Agify returns age: null → return 502, do not store
+	if agifyData.Age == 0 {
+		respondWithError(w, 502, fmt.Sprintf("%v returned an invalid response", AGIFY_API_URL))
+		return
+	}
+
 	//--- fetch nationalizeAPI ---
 	nationalizeData, err := fetchDataFromAPI[NationalizeResponse](NATIONALIZE_API_URL, nameParam, w)
 	if err != nil {
 		return
 	}
+	// Nationalize returns no country data → return 502, do not store
+	if len(nationalizeData.Country) == 0 {
+		respondWithError(w, 502, fmt.Sprintf("%v returned an invalid response", AGIFY_API_URL))
+		return
+	}
 
-	user := database.CreateUserParams{
+	profile := database.CreateProfileParams{
 		ID:                 uuid.New(),
 		Name:               genderizeData.Name,
 		Gender:             genderizeData.Gender,
 		GenderProbability:  genderizeData.Probability,
-		SampleSize:         int32(genderizeData.SampleSize),
+		SampleSize:         int32(genderizeData.Count),
 		Age:                int32(agifyData.Age),
+		AgeGroup:           ageGroupFromAgify(agifyData.Age),
 		CountryID:          nationalizeData.Country[0].CountryID,
 		CountryProbability: nationalizeData.Country[0].Probability,
 	}
 
-	dbUser, err = q.CreateUser(context.Background(), user)
+	dbUser, err = q.CreateProfile(context.Background(), profile)
 	if err != nil {
-		fmt.Printf("error creating user, error: %v", err)
+		fmt.Printf("error creating profile, error: %v", err)
+		respondWithError(w, 500, "internal server Error")
 		return
-		//respond with internal server error Here!
 	}
 
 	createUserObj.Status = "success"
@@ -102,21 +128,98 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 }
 
 func handlerGetProfileWithID(w http.ResponseWriter, r *http.Request, q *database.Queries) {
-	// fmt.Fprint(w, "from get profile with ID handler!")
-	// fmt.Println("get profile with ID!!")
-	// w.Header().Set("Access-Control-Allow-Origin", "*")
-	// err, errObj, nameParam := validateParam(r.URL.Query())
-	// if err != nil {
-	// 	respondWithError(w, errObj.StatusCode, errObj.Message)
-	// }
-	//call external genderizeAPI with name Params
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	userInput := r.PathValue("id")
+	id, err := uuid.Parse(userInput)
+	if err != nil {
+		errorMsg := fmt.Sprintf("error, ID: %v is not a valid UUID", userInput)
+		respondWithError(w, 400, errorMsg)
+		return
+	}
+	fmt.Printf("profile id with value: %v is a valid UUID\n", userInput)
+
+	profileFromDB, err := q.GetProfileByID(context.Background(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// No user found
+			fmt.Println("profile does not exist")
+			respondWithError(w, 400, "profile does not exist")
+			return
+		} else {
+			// Real error — stop execution
+			fmt.Printf("error fetching user by name err: %v", err)
+			respondWithError(w, 500, "internal server Error")
+			return
+		}
+	}
+
+	var profileObj userProfile
+	profileObj.Status = "success"
+	profileObj.Data = userData{
+		ID:                 profileFromDB.ID,
+		Name:               profileFromDB.Name,
+		Gender:             profileFromDB.Gender,
+		GenderProbability:  profileFromDB.GenderProbability,
+		SampleSize:         int(profileFromDB.SampleSize),
+		Age:                int(profileFromDB.Age),
+		AgeGroup:           profileFromDB.AgeGroup,
+		CountryID:          profileFromDB.CountryID,
+		CountryProbability: profileFromDB.CountryProbability,
+		CreatedAt:          profileFromDB.CreatedAt.Time,
+	}
+
+	respondWithJSON(w, profileObj, 200)
+	return
 
 }
+
 func handlerGetUsers(w http.ResponseWriter, r *http.Request, q *database.Queries) {
-	fmt.Fprint(w, "from get all profiles handler!!")
-	fmt.Println("get all profiles!!")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	profilesFromDB, err := q.GetAllProfiles(context.Background())
+	if err != nil {
+		fmt.Printf("error fetching all profiles: %v", err)
+		respondWithError(w, 500, "internal server error")
+		return
+	}
+
+	var profiles []allProfiilesData
+	for _, DBprofile := range profilesFromDB {
+		profiles = append(profiles, allProfiilesData{
+			ID:        DBprofile.ID,
+			Name:      DBprofile.Name,
+			Gender:    DBprofile.Gender,
+			Age:       int(DBprofile.Age),
+			AgeGroup:  DBprofile.AgeGroup,
+			CountryID: DBprofile.CountryID,
+		})
+	}
+
+	responsePayload := allProfiiles{
+		Status: "success",
+		Count:  len(profiles),
+		Data:   profiles,
+	}
+
+	respondWithJSON(w, responsePayload, 200)
+	return
+
 }
-func handlerDeleteProfile(w http.ResponseWriter, r *http.Request, q *database.Queries) {
-	fmt.Fprint(w, "from delete profile handler!!")
-	fmt.Println("delete profile!!")
+
+func handlerDeleteProfileWithID(w http.ResponseWriter, r *http.Request, q *database.Queries) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	userInput := r.PathValue("id")
+	id, err := uuid.Parse(userInput)
+	if err != nil {
+		errorMsg := fmt.Sprintf("error, ID: %v is not a valid UUID", userInput)
+		respondWithError(w, 400, errorMsg)
+		return
+	}
+
+	err = q.DeleteProfileByID(context.Background(), id)
+	if err != nil {
+		respondWithError(w, 500, "internal server Error")
+		return
+	}
+	w.WriteHeader(204)
+
 }

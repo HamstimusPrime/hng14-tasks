@@ -42,7 +42,7 @@ func main() {
 		handlerGetUsers(w, r, queries)
 	})
 	http.HandleFunc("DELETE /api/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
-		handlerDeleteProfile(w, r, queries)
+		handlerDeleteProfileWithID(w, r, queries)
 	})
 
 	// Start the server on the PORT environment variable or default to 8080

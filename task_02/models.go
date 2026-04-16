@@ -7,16 +7,18 @@ import (
 )
 
 type allProfiiles struct {
-	Status string `json:"status"`
-	Count  int    `json:"count"`
-	Data   struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Gender    string `json:"gender"`
-		Age       int    `json:"age"`
-		AgeGroup  string `json:"age_group"`
-		CountryID string `json:"country_id"`
-	} `json:"data"`
+	Status string             `json:"status"`
+	Count  int                `json:"count"`
+	Data   []allProfiilesData `json:"data"`
+}
+
+type allProfiilesData struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Gender    string    `json:"gender"`
+	Age       int       `json:"age"`
+	AgeGroup  string    `json:"age_group"`
+	CountryID string    `json:"country_id"`
 }
 
 type userProfile struct {
@@ -60,10 +62,8 @@ type AgifyResponse struct {
 }
 
 type GenderizeResponse struct {
-	Name        string    `json:"name"`
-	Gender      string    `json:"gender"`
-	Probability float64   `json:"probability"`
-	SampleSize  int       `json:"sample_size"`
-	IsConfident bool      `json:"is_confident"`
-	ProcessedAt time.Time `json:"processed_at"`
+	Count       int     `json:"count"`
+	Name        string  `json:"name"`
+	Gender      string  `json:"gender"`
+	Probability float64 `json:"probability"`
 }

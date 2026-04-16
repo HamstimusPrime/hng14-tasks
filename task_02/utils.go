@@ -50,8 +50,26 @@ func validateParam(param url.Values) (error, ErrorObject, string) {
 
 }
 
+func ageGroupFromAgify(age int) string {
+	//Age group from Agify: 0–12 → child, 13–19 → teenager, 20–59 → adult, 60+ → senior
+	if (age >= 0) && (age <= 12) {
+		return "child"
+	}
+	if (age >= 13) && (age <= 19) {
+		return "teenager"
+	}
+	if (age >= 20) && (age <= 59) {
+		return "teenager"
+	}
+	if age >= 60 {
+		return "senior"
+	}
+	return ""
+
+}
+
 func fetchDataFromAPI[T any](apiURL string, params string, w http.ResponseWriter) (T, error) {
-	//this function should return a struct
+
 	var result T
 
 	fullURLPath := fmt.Sprintf("%v?name=%v", apiURL, params)

@@ -1,4 +1,4 @@
--- name: CreateUser :one
+-- name: CreateProfile :one
 INSERT INTO users(id, name, gender, gender_probability, sample_size, age,age_group, country_id, country_probability, created_at )
 VALUES(
     $1,
@@ -13,6 +13,19 @@ VALUES(
     NOW()
 )RETURNING *;
 
--- name: GetUserByName :one
+-- name: GetProfileByName :one
  SELECT * FROM users
 WHERE name = $1;
+
+
+
+-- name: GetProfileByID :one
+SELECT * FROM users
+WHERE id = $1;
+
+-- name: GetAllProfiles :many
+SELECT * FROM users;
+
+-- name: DeleteProfileByID :exec
+DELETE FROM users
+WHERE id = $1;
