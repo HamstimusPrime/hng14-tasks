@@ -19,6 +19,6 @@ type User struct {
 	Age                int32
 	AgeGroup           string
 	CountryID          string
-	CountryProbability uuid.UUID
+	CountryProbability float64
 	CreatedAt          sql.NullTime
 }

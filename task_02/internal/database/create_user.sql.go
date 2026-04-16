@@ -14,7 +14,6 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users(id, name, gender, gender_probability, sample_size, age,age_group, country_id, country_probability, created_at )
 VALUES(
-    gen_random_uuid(),
     $1,
     $2,
     $3,
@@ -23,11 +22,13 @@ VALUES(
     $6,
     $7,
     $8,
+    $9,
     NOW()
 )RETURNING id, name, gender, gender_probability, sample_size, age, age_group, country_id, country_probability, created_at
 `
 
 type CreateUserParams struct {
+	ID                 uuid.UUID
 	Name               string
 	Gender             string
 	GenderProbability  float64
@@ -35,11 +36,12 @@ type CreateUserParams struct {
 	Age                int32
 	AgeGroup           string
 	CountryID          string
-	CountryProbability uuid.UUID
+	CountryProbability float64
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, createUser,
+		arg.ID,
 		arg.Name,
 		arg.Gender,
 		arg.GenderProbability,
@@ -49,6 +51,29 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.CountryID,
 		arg.CountryProbability,
 	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Gender,
+		&i.GenderProbability,
+		&i.SampleSize,
+		&i.Age,
+		&i.AgeGroup,
+		&i.CountryID,
+		&i.CountryProbability,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getUserByName = `-- name: GetUserByName :one
+ SELECT id, name, gender, gender_probability, sample_size, age, age_group, country_id, country_probability, created_at FROM users
+WHERE name = $1
+`
+
+func (q *Queries) GetUserByName(ctx context.Context, name string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByName, name)
 	var i User
 	err := row.Scan(
 		&i.ID,

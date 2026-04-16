@@ -26,7 +26,7 @@ func main() {
 
 	handler := http.TimeoutHandler(
 		http.DefaultServeMux,
-		500*time.Millisecond,
+		9000*time.Millisecond,
 		"request timed out",
 	)
 
