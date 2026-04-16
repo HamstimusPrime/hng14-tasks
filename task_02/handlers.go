@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hng_task_02/internal/database"
+	"log"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -26,17 +27,17 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// continue to create profile with name if name not found in DB
-			fmt.Println("user does not exist, continuing...")
+			log.Println("user does not exist, continuing...")
 		} else {
 			// Real error — stop execution
-			fmt.Printf("error fetching profile by name err: %v", err)
+			log.Printf("error fetching profile by name err: %v", err)
 			respondWithError(w, 500, "internal server Error")
 			return
 		}
 	}
 
 	if dbUser.Name == nameParam {
-		fmt.Printf("duplicate entry! entry with name: {%v} already exists!!\n", nameParam)
+		log.Printf("duplicate entry! entry with name: {%v} already exists!!\n", nameParam)
 
 		createUserObj.Status = "success"
 		createUserObj.Message = "Profile already exists"
@@ -104,7 +105,7 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 
 	dbUser, err = q.CreateProfile(context.Background(), profile)
 	if err != nil {
-		fmt.Printf("error creating profile, error: %v", err)
+		log.Printf("error creating profile, error: %v", err)
 		respondWithError(w, 500, "internal server Error")
 		return
 	}
@@ -136,18 +137,18 @@ func handlerGetProfileWithID(w http.ResponseWriter, r *http.Request, q *database
 		respondWithError(w, 400, errorMsg)
 		return
 	}
-	fmt.Printf("profile id with value: %v is a valid UUID\n", userInput)
+	log.Printf("profile id with value: %v is a valid UUID\n", userInput)
 
 	profileFromDB, err := q.GetProfileByID(context.Background(), id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// No user found
-			fmt.Println("profile does not exist")
+			log.Println("profile does not exist")
 			respondWithError(w, 400, "profile does not exist")
 			return
 		} else {
 			// Real error — stop execution
-			fmt.Printf("error fetching user by name err: %v", err)
+			log.Printf("error fetching user by name err: %v", err)
 			respondWithError(w, 500, "internal server Error")
 			return
 		}
@@ -177,7 +178,7 @@ func handlerGetUsers(w http.ResponseWriter, r *http.Request, q *database.Queries
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	profilesFromDB, err := q.GetAllProfiles(context.Background())
 	if err != nil {
-		fmt.Printf("error fetching all profiles: %v", err)
+		log.Printf("error fetching all profiles: %v", err)
 		respondWithError(w, 500, "internal server error")
 		return
 	}

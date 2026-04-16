@@ -73,14 +73,14 @@ func fetchDataFromAPI[T any](apiURL string, params string, w http.ResponseWriter
 	var result T
 
 	fullURLPath := fmt.Sprintf("%v?name=%v", apiURL, params)
-	fmt.Printf("fetching data from url: %v...\n", fullURLPath)
+	log.Printf("fetching data from url: %v...\n", fullURLPath)
 	r, err := http.Get(fullURLPath)
 	if err != nil {
 		msg := fmt.Sprintf("%v returned an invalid response", apiURL)
 		respondWithError(w, r.StatusCode, msg)
 		return result, errors.New(msg)
 	}
-	fmt.Printf("fetch from %v complete!\n", fullURLPath)
+	log.Printf("fetch from %v complete!\n", fullURLPath)
 
 	defer r.Body.Close()
 
