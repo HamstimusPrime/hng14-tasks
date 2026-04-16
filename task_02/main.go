@@ -9,17 +9,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
+
 	DB_URL := os.Getenv("DB_URL")
-	log.Fatalf("sql URL is %v", DB_URL)
+	log.Panicf("sql URL is %v", DB_URL)
 	db, err := sql.Open("postgres", DB_URL)
 	if err != nil {
 		log.Fatalf("unable to establish connection to database: %v", err)
