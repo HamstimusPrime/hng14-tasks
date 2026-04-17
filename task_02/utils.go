@@ -60,7 +60,7 @@ func ageGroupFromAgify(age int) string {
 		return "teenager"
 	}
 	if (age >= 20) && (age <= 59) {
-		return "teenager"
+		return "adult"
 	}
 	if age >= 60 {
 		return "senior"
