@@ -13,6 +13,10 @@ import (
 )
 
 func main() {
+	// err := godotenv.Load()
+	// if err != nil {
+	// 	log.Println("Error loading .env file")
+	// }
 
 	DB_URL := os.Getenv("DB_URL")
 	log.Printf("logging... %v\n", DB_URL)
@@ -36,7 +40,7 @@ func main() {
 		handlerGetProfileWithID(w, r, queries)
 	})
 	http.HandleFunc("GET /api/profiles", func(w http.ResponseWriter, r *http.Request) {
-		handlerGetUsers(w, r, queries)
+		handlerGetProfiles(w, r, queries)
 	})
 	http.HandleFunc("DELETE /api/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
 		handlerDeleteProfileWithID(w, r, queries)

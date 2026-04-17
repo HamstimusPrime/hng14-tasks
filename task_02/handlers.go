@@ -127,7 +127,7 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 		CreatedAt:          dbUser.CreatedAt.Time,
 	}
 
-	respondWithJSON(w, createUserObj, 200)
+	respondWithJSON(w, createUserObj, 201)
 	return
 }
 
@@ -136,8 +136,8 @@ func handlerGetProfileWithID(w http.ResponseWriter, r *http.Request, q *database
 	userInput := r.PathValue("id")
 	id, err := uuid.Parse(userInput)
 	if err != nil {
-		errorMsg := fmt.Sprintf("error, ID: %v is not a valid UUID", userInput)
-		respondWithError(w, 400, errorMsg)
+		log.Printf("error, ID: %v is not a valid UUID", userInput)
+		respondWithError(w, 422, "Unprocessable Entity: Invalid type")
 		return
 	}
 	log.Printf("profile id with value: %v is a valid UUID\n", userInput)
@@ -147,7 +147,7 @@ func handlerGetProfileWithID(w http.ResponseWriter, r *http.Request, q *database
 		if errors.Is(err, sql.ErrNoRows) {
 			// No user found
 			log.Println("profile does not exist")
-			respondWithError(w, 400, "profile does not exist")
+			respondWithError(w, 404, "Not Found: Profile not found")
 			return
 		} else {
 			// Real error — stop execution
@@ -177,7 +177,7 @@ func handlerGetProfileWithID(w http.ResponseWriter, r *http.Request, q *database
 
 }
 
-func handlerGetUsers(w http.ResponseWriter, r *http.Request, q *database.Queries) {
+func handlerGetProfiles(w http.ResponseWriter, r *http.Request, q *database.Queries) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	profilesFromDB, err := q.GetAllProfiles(context.Background())
 	if err != nil {
