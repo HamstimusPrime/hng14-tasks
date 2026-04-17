@@ -15,15 +15,23 @@ import (
 func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Queries) {
 
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	err, errObj, nameParam := validateParam(r.URL.Query())
+
+	reqBody, err := parseReqBody(r, requestBody{})
 	if err != nil {
-		respondWithError(w, errObj.StatusCode, errObj.Message)
+		log.Printf("unable to parse request body, err: %v\n", err)
+		respondWithError(w, 502, " Upstream or server failure")
+		return
+	}
+
+	if reqBody.Name == "" {
+		respondWithError(w, 422, " Unprocessable Entity: Invalid type")
 		return
 	}
 
 	var dbUser database.User
 	var createUserObj userProfile
-	dbUser, err = q.GetProfileByName(context.Background(), nameParam)
+
+	dbUser, err = q.GetProfileByName(context.Background(), reqBody.Name)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// continue to create profile with name if name not found in DB
@@ -36,8 +44,8 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 		}
 	}
 
-	if dbUser.Name == nameParam {
-		log.Printf("duplicate entry! entry with name: {%v} already exists!!\n", nameParam)
+	if dbUser.Name == reqBody.Name {
+		log.Printf("duplicate entry! entry with name: {%v} already exists!!\n", reqBody.Name)
 
 		createUserObj.Status = "success"
 		createUserObj.Message = "Profile already exists"
@@ -59,7 +67,7 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 	}
 
 	//--- fetch genderizeAPI ---
-	genderizeData, err := fetchDataFromAPI[GenderizeResponse](GENDERIZE_API_URL, nameParam, w)
+	genderizeData, err := fetchDataFromAPI[GenderizeResponse](GENDERIZE_API_URL, reqBody.Name, w)
 	if err != nil {
 		return
 	}
@@ -70,7 +78,7 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 	}
 
 	//--- fetch agifyAPI ---
-	agifyData, err := fetchDataFromAPI[AgifyResponse](AGIFY_API_URL, nameParam, w)
+	agifyData, err := fetchDataFromAPI[AgifyResponse](AGIFY_API_URL, reqBody.Name, w)
 	if err != nil {
 		return
 	}
@@ -81,7 +89,7 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 	}
 
 	//--- fetch nationalizeAPI ---
-	nationalizeData, err := fetchDataFromAPI[NationalizeResponse](NATIONALIZE_API_URL, nameParam, w)
+	nationalizeData, err := fetchDataFromAPI[NationalizeResponse](NATIONALIZE_API_URL, reqBody.Name, w)
 	if err != nil {
 		return
 	}

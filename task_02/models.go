@@ -69,3 +69,7 @@ type GenderizeResponse struct {
 	Gender      string  `json:"gender"`
 	Probability float64 `json:"probability"`
 }
+
+type requestBody struct {
+	Name string `json:"name"`
+}

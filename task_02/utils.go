@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"sort"
-	"strconv"
 )
 
 var AGIFY_API_URL string = "https://api.agify.io/"
@@ -32,23 +30,6 @@ func respondWithJSON(w http.ResponseWriter, resTemplate interface{}, HTTPstatus 
 	w.Header().Set("Content-Type", "json/plain; charset=utf-8")
 	w.WriteHeader(HTTPstatus)
 	w.Write([]byte(resJSON))
-}
-
-func validateParam(param url.Values) (error, ErrorObject, string) {
-	nameParam := param.Get("name")
-	if nameParam == "" {
-		msg := "Bad Request: Missing or empty name parameter"
-		return fmt.Errorf(msg), ErrorObject{"error", msg, 400}, ""
-	}
-
-	_, err := strconv.Atoi(nameParam)
-	if err != nil {
-		return nil, ErrorObject{"", "", 200}, nameParam
-	}
-
-	msg := fmt.Sprintf("Unprocessable Entity: %v is not a string", nameParam)
-	return fmt.Errorf(msg), ErrorObject{"error", msg, 422}, ""
-
 }
 
 func ageGroupFromAgify(age int) string {
@@ -106,4 +87,11 @@ func fetchDataFromAPI[T any](apiURL string, params string, w http.ResponseWriter
 		return result, errors.New(msg)
 	}
 	return result, nil
+}
+
+func parseReqBody(req *http.Request, format requestBody) (requestBody, error) {
+	if err := json.NewDecoder(req.Body).Decode(&format); err != nil {
+		return requestBody{}, err
+	}
+	return format, nil
 }
