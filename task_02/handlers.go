@@ -62,7 +62,7 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 			CreatedAt:          dbUser.CreatedAt.Time,
 		}
 
-		respondWithJSON(w, createUserObj, 420)
+		respondWithJSON(w, createUserObj, 200)
 		return
 	}
 
