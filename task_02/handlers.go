@@ -74,7 +74,7 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 	if err != nil {
 		return
 	}
-	// Agify returns age: null → return 502, do not store
+	// If Agify returns age: null → return 502, do not store
 	if agifyData.Age == 0 {
 		respondWithError(w, 502, fmt.Sprintf("%v returned an invalid response", AGIFY_API_URL))
 		return
@@ -85,11 +85,14 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 	if err != nil {
 		return
 	}
-	// Nationalize returns no country data → return 502, do not store
+	// If Nationalize returns no country data → return 502, do not store
 	if len(nationalizeData.Country) == 0 {
 		respondWithError(w, 502, fmt.Sprintf("%v returned an invalid response", AGIFY_API_URL))
 		return
 	}
+
+	// Nationality: pick the country with
+	// the highest probability from the Nationalize response
 
 	profile := database.CreateProfileParams{
 		ID:                 uuid.New(),
@@ -99,8 +102,8 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 		SampleSize:         int32(genderizeData.Count),
 		Age:                int32(agifyData.Age),
 		AgeGroup:           ageGroupFromAgify(agifyData.Age),
-		CountryID:          nationalizeData.Country[0].CountryID,
-		CountryProbability: nationalizeData.Country[0].Probability,
+		CountryID:          getTopCountry(nationalizeData.Country).CountryID,
+		CountryProbability: getTopCountry(nationalizeData.Country).Probability,
 	}
 
 	dbUser, err = q.CreateProfile(context.Background(), profile)

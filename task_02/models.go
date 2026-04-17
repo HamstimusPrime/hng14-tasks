@@ -47,12 +47,14 @@ type ErrorObject struct {
 }
 
 type NationalizeResponse struct {
-	Count   int    `json:"count"`
-	Name    string `json:"name"`
-	Country []struct {
-		CountryID   string  `json:"country_id"`
-		Probability float64 `json:"probability"`
-	} `json:"country"`
+	Count   int           `json:"count"`
+	Name    string        `json:"name"`
+	Country []CountryData `json:"country"`
+}
+
+type CountryData struct {
+	CountryID   string  `json:"country_id"`
+	Probability float64 `json:"probability"`
 }
 
 type AgifyResponse struct {

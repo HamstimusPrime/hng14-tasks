@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 )
 
@@ -66,6 +67,18 @@ func ageGroupFromAgify(age int) string {
 	}
 	return ""
 
+}
+
+func getTopCountry(countries []CountryData) CountryData {
+	if len(countries) == 0 {
+		return CountryData{}
+	}
+
+	sort.Slice(countries, func(i, j int) bool {
+		return countries[i].Probability > countries[j].Probability
+	})
+
+	return countries[0]
 }
 
 func fetchDataFromAPI[T any](apiURL string, params string, w http.ResponseWriter) (T, error) {

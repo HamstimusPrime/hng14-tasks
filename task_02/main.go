@@ -13,10 +13,6 @@ import (
 )
 
 func main() {
-	// err := godotenv.Load()
-	// if err != nil {
-	// 	log.Println("Error loading .env file")
-	// }
 
 	DB_URL := os.Getenv("DB_URL")
 	log.Printf("logging... %v\n", DB_URL)
