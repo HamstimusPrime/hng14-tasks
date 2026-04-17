@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 )
@@ -58,8 +59,14 @@ func getTopCountry(countries []CountryData) CountryData {
 	sort.Slice(countries, func(i, j int) bool {
 		return countries[i].Probability > countries[j].Probability
 	})
-
+	//round off country probability to 2 decimal places
+	countries[0].Probability = roundTo(countries[0].Probability, 2)
 	return countries[0]
+}
+
+func roundTo(num float64, places int) float64 {
+	factor := math.Pow(10, float64(places))
+	return math.Round(num*factor) / factor
 }
 
 func fetchDataFromAPI[T any](apiURL string, params string, w http.ResponseWriter) (T, error) {
