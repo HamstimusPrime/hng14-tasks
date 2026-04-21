@@ -8,6 +8,7 @@ import (
 	"hng_task_03/internal/database"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -298,4 +299,80 @@ func handlerDeleteProfileWithID(w http.ResponseWriter, r *http.Request, q *datab
 	}
 	w.WriteHeader(204)
 
+}
+
+func handlerNLQsearch(w http.ResponseWriter, r *http.Request, q *database.Queries) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	query := r.URL.Query().Get("q")
+	if strings.TrimSpace(query) == "" {
+		respondWithError(w, 400, "Missing or empty parameter")
+		return
+	}
+
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+	if (pageStr != "" && !isValidIntParam(pageStr)) || (limitStr != "" && !isValidIntParam(limitStr)) {
+		respondWithError(w, 422, "Invalid query parameters")
+		return
+	}
+
+	filter, ok := parseNLQuery(query)
+	if !ok {
+		respondWithError(w, 422, "Unable to interpret query")
+		return
+	}
+
+	page := parseIntParam(r, "page", 1)
+	limit := parseIntParam(r, "limit", 10)
+	if limit > 50 {
+		limit = 50
+	}
+	offset := (page - 1) * limit
+	filter.Limit = int32(limit)
+	filter.Offset = int32(offset)
+	filter.Order = "ASC"
+
+	total, err := q.GetFilteredProfileCount(context.Background(), filter)
+	if err != nil {
+		log.Printf("error counting profiles: %v", err)
+		respondWithError(w, 500, "internal server error")
+		return
+	}
+
+	if total == 0 {
+		respondWithError(w, 404, "Profile not found")
+		return
+	}
+
+	profilesFromDB, err := q.GetFilteredProfiles(context.Background(), filter)
+	if err != nil {
+		log.Printf("error fetching profiles: %v", err)
+		respondWithError(w, 500, "internal server error")
+		return
+	}
+
+	var profiles []allProfiilesData
+	for _, p := range profilesFromDB {
+		profiles = append(profiles, allProfiilesData{
+			ID:                 p.ID,
+			Name:               p.Name,
+			Gender:             p.Gender,
+			GenderProbability:  p.GenderProbability,
+			Age:                int(p.Age),
+			AgeGroup:           p.AgeGroup,
+			CountryID:          p.CountryID,
+			CountryName:        countryNameFromCode(p.CountryID),
+			CountryProbability: p.CountryProbability,
+			CreatedAt:          p.CreatedAt.Time,
+		})
+	}
+
+	respondWithJSON(w, allProfiiles{
+		Status: "success",
+		Page:   page,
+		Limit:  limit,
+		Total:  total,
+		Data:   profiles,
+	}, 200)
 }

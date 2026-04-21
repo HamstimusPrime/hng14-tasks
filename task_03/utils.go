@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hng_task_03/internal/database"
 	"log"
 	"math"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 var AGIFY_API_URL string = "https://api.agify.io/"
@@ -145,4 +148,119 @@ func countryNameFromCode(code string) string {
 		return name
 	}
 	return code
+}
+
+var countryNameToCode map[string]string
+
+func init() {
+	countryNameToCode = make(map[string]string, len(isoCountryNames))
+	for code, name := range isoCountryNames {
+		countryNameToCode[strings.ToLower(name)] = code
+	}
+}
+
+func isValidIntParam(s string) bool {
+	_, err := strconv.Atoi(s)
+	return err == nil
+}
+
+func containsAny(words []string, targets []string) bool {
+	for _, w := range words {
+		for _, t := range targets {
+			if w == t {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func findWordIndex(words []string, targets []string) int {
+	return slices.IndexFunc(words, func(w string) bool {
+		return slices.Contains(targets, w)
+	})
+}
+
+func findCountryCode(text string) string {
+	words := strings.Fields(text)
+	for length := len(words); length > 0; length-- {
+		candidate := strings.Join(words[:length], " ")
+		if code, ok := countryNameToCode[candidate]; ok {
+			return code
+		}
+	}
+	return ""
+}
+
+func parseNLQuery(q string) (database.ProfileFilter, bool) {
+	words := strings.Fields(strings.ToLower(q))
+	var filter database.ProfileFilter
+	found := false
+
+	hasMale := containsAny(words, []string{"male", "males", "man", "men", "boy", "boys"})
+	hasFemale := containsAny(words, []string{"female", "females", "woman", "women", "girl", "girls"})
+	if hasMale || hasFemale {
+		found = true
+		if hasMale && !hasFemale {
+			g := "male"
+			filter.Gender = &g
+		} else if hasFemale && !hasMale {
+			g := "female"
+			filter.Gender = &g
+		}
+	}
+
+	if containsAny(words, []string{"teenager", "teenagers", "teen", "teens"}) {
+		ag := "teenager"
+		filter.AgeGroup = &ag
+		found = true
+	} else if containsAny(words, []string{"adult", "adults"}) {
+		ag := "adult"
+		filter.AgeGroup = &ag
+		found = true
+	} else if containsAny(words, []string{"child", "children", "kid", "kids"}) {
+		ag := "child"
+		filter.AgeGroup = &ag
+		found = true
+	} else if containsAny(words, []string{"senior", "seniors", "elderly"}) {
+		ag := "senior"
+		filter.AgeGroup = &ag
+		found = true
+	}
+
+	if containsAny(words, []string{"young"}) {
+		found = true
+		minAge := int32(16)
+		maxAge := int32(24)
+		filter.MinAge = &minAge
+		filter.MaxAge = &maxAge
+	}
+
+	// "above/over X" overrides young's min_age
+	if idx := findWordIndex(words, []string{"above", "over"}); idx >= 0 && idx+1 < len(words) {
+		if n, err := strconv.Atoi(words[idx+1]); err == nil {
+			v := int32(n)
+			filter.MinAge = &v
+			found = true
+		}
+	}
+
+	// "below/under X" overrides young's max_age
+	if idx := findWordIndex(words, []string{"below", "under"}); idx >= 0 && idx+1 < len(words) {
+		if n, err := strconv.Atoi(words[idx+1]); err == nil {
+			v := int32(n)
+			filter.MaxAge = &v
+			found = true
+		}
+	}
+
+	if idx := findWordIndex(words, []string{"from"}); idx >= 0 && idx+1 < len(words) {
+		remaining := strings.Join(words[idx+1:], " ")
+		if code := findCountryCode(remaining); code != "" {
+			filter.CountryID = &code
+			found = true
+		}
+	}
+
+	return filter, found
 }
