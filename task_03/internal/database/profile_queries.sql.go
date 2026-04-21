@@ -12,7 +12,7 @@ import (
 )
 
 const createProfile = `-- name: CreateProfile :one
-INSERT INTO users(id, name, gender, gender_probability, sample_size, age,age_group, country_id, country_probability, created_at )
+INSERT INTO users(id, name, gender, gender_probability, age,age_group, country_id, country_probability, created_at )
 VALUES(
     $1,
     $2,
@@ -22,9 +22,8 @@ VALUES(
     $6,
     $7,
     $8,
-    $9,
     NOW()
-)RETURNING id, name, gender, gender_probability, sample_size, age, age_group, country_id, country_probability, created_at
+)RETURNING id, name, gender, gender_probability, age, country_name, age_group, country_id, country_probability, created_at
 `
 
 type CreateProfileParams struct {
@@ -32,7 +31,6 @@ type CreateProfileParams struct {
 	Name               string
 	Gender             string
 	GenderProbability  float64
-	SampleSize         int32
 	Age                int32
 	AgeGroup           string
 	CountryID          string
@@ -45,7 +43,6 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (U
 		arg.Name,
 		arg.Gender,
 		arg.GenderProbability,
-		arg.SampleSize,
 		arg.Age,
 		arg.AgeGroup,
 		arg.CountryID,
@@ -57,8 +54,8 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (U
 		&i.Name,
 		&i.Gender,
 		&i.GenderProbability,
-		&i.SampleSize,
 		&i.Age,
+		&i.CountryName,
 		&i.AgeGroup,
 		&i.CountryID,
 		&i.CountryProbability,
@@ -78,7 +75,7 @@ func (q *Queries) DeleteProfileByID(ctx context.Context, id uuid.UUID) error {
 }
 
 const getAllProfiles = `-- name: GetAllProfiles :many
-SELECT id, name, gender, gender_probability, sample_size, age, age_group, country_id, country_probability, created_at FROM users
+SELECT id, name, gender, gender_probability, age, country_name, age_group, country_id, country_probability, created_at FROM users
 `
 
 func (q *Queries) GetAllProfiles(ctx context.Context) ([]User, error) {
@@ -95,8 +92,8 @@ func (q *Queries) GetAllProfiles(ctx context.Context) ([]User, error) {
 			&i.Name,
 			&i.Gender,
 			&i.GenderProbability,
-			&i.SampleSize,
 			&i.Age,
+			&i.CountryName,
 			&i.AgeGroup,
 			&i.CountryID,
 			&i.CountryProbability,
@@ -116,7 +113,7 @@ func (q *Queries) GetAllProfiles(ctx context.Context) ([]User, error) {
 }
 
 const getProfileByID = `-- name: GetProfileByID :one
-SELECT id, name, gender, gender_probability, sample_size, age, age_group, country_id, country_probability, created_at FROM users
+SELECT id, name, gender, gender_probability, age, country_name, age_group, country_id, country_probability, created_at FROM users
 WHERE id = $1
 `
 
@@ -128,8 +125,8 @@ func (q *Queries) GetProfileByID(ctx context.Context, id uuid.UUID) (User, error
 		&i.Name,
 		&i.Gender,
 		&i.GenderProbability,
-		&i.SampleSize,
 		&i.Age,
+		&i.CountryName,
 		&i.AgeGroup,
 		&i.CountryID,
 		&i.CountryProbability,
@@ -139,7 +136,7 @@ func (q *Queries) GetProfileByID(ctx context.Context, id uuid.UUID) (User, error
 }
 
 const getProfileByName = `-- name: GetProfileByName :one
- SELECT id, name, gender, gender_probability, sample_size, age, age_group, country_id, country_probability, created_at FROM users
+ SELECT id, name, gender, gender_probability, age, country_name, age_group, country_id, country_probability, created_at FROM users
 WHERE name = $1
 `
 
@@ -151,8 +148,8 @@ func (q *Queries) GetProfileByName(ctx context.Context, name string) (User, erro
 		&i.Name,
 		&i.Gender,
 		&i.GenderProbability,
-		&i.SampleSize,
 		&i.Age,
+		&i.CountryName,
 		&i.AgeGroup,
 		&i.CountryID,
 		&i.CountryProbability,

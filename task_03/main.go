@@ -40,7 +40,9 @@ func main() {
 	http.HandleFunc("GET /api/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
 		handlerGetProfileWithID(w, r, queries)
 	})
-
+	http.HandleFunc("GET /api/profiles", func(w http.ResponseWriter, r *http.Request) {
+		handlerGetProfiles(w, r, queries)
+	})
 	http.HandleFunc("GET /api/profiles/search", func(w http.ResponseWriter, r *http.Request) {
 		handlerNLQsearch(w, r, queries)
 	})

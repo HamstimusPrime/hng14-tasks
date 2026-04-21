@@ -55,12 +55,10 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 			Name:               dbUser.Name,
 			Gender:             dbUser.Gender,
 			GenderProbability:  dbUser.GenderProbability,
-			SampleSize:         int(dbUser.SampleSize),
 			Age:                int(dbUser.Age),
 			AgeGroup:           dbUser.AgeGroup,
 			CountryID:          dbUser.CountryID,
 			CountryProbability: dbUser.CountryProbability,
-			CreatedAt:          dbUser.CreatedAt.Time,
 		}
 
 		respondWithJSON(w, createUserObj, 200)
@@ -108,7 +106,6 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 		Name:               genderizeData.Name,
 		Gender:             genderizeData.Gender,
 		GenderProbability:  genderizeData.Probability,
-		SampleSize:         int32(genderizeData.Count),
 		Age:                int32(agifyData.Age),
 		AgeGroup:           ageGroupFromAgify(agifyData.Age),
 		CountryID:          getTopCountry(nationalizeData.Country).CountryID,
@@ -128,12 +125,10 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 		Name:               dbUser.Name,
 		Gender:             dbUser.Gender,
 		GenderProbability:  dbUser.GenderProbability,
-		SampleSize:         int(dbUser.SampleSize),
 		Age:                int(dbUser.Age),
 		AgeGroup:           dbUser.AgeGroup,
 		CountryID:          dbUser.CountryID,
 		CountryProbability: dbUser.CountryProbability,
-		CreatedAt:          dbUser.CreatedAt.Time,
 	}
 
 	respondWithJSON(w, createUserObj, 201)
@@ -173,12 +168,10 @@ func handlerGetProfileWithID(w http.ResponseWriter, r *http.Request, q *database
 		Name:               profileFromDB.Name,
 		Gender:             profileFromDB.Gender,
 		GenderProbability:  profileFromDB.GenderProbability,
-		SampleSize:         int(profileFromDB.SampleSize),
 		Age:                int(profileFromDB.Age),
 		AgeGroup:           profileFromDB.AgeGroup,
 		CountryID:          profileFromDB.CountryID,
 		CountryProbability: profileFromDB.CountryProbability,
-		CreatedAt:          profileFromDB.CreatedAt.Time,
 	}
 
 	respondWithJSON(w, profileObj, 200)
@@ -269,7 +262,6 @@ func handlerGetProfiles(w http.ResponseWriter, r *http.Request, q *database.Quer
 			CountryID:          p.CountryID,
 			CountryName:        countryNameFromCode(p.CountryID),
 			CountryProbability: p.CountryProbability,
-			CreatedAt:          p.CreatedAt.Time,
 		})
 	}
 
@@ -364,7 +356,6 @@ func handlerNLQsearch(w http.ResponseWriter, r *http.Request, q *database.Querie
 			CountryID:          p.CountryID,
 			CountryName:        countryNameFromCode(p.CountryID),
 			CountryProbability: p.CountryProbability,
-			CreatedAt:          p.CreatedAt.Time,
 		})
 	}
 

@@ -1,5 +1,5 @@
 -- name: CreateProfile :one
-INSERT INTO users(id, name, gender, gender_probability, sample_size, age,age_group, country_id, country_probability, created_at )
+INSERT INTO users(id, name, gender, gender_probability, age,age_group, country_id, country_probability, created_at )
 VALUES(
     $1,
     $2,
@@ -9,7 +9,6 @@ VALUES(
     $6,
     $7,
     $8,
-    $9,
     NOW()
 )RETURNING *;
 

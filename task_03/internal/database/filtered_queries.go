@@ -63,14 +63,14 @@ func buildWhereClause(f ProfileFilter) (string, []any) {
 }
 
 func (q *Queries) GetFilteredProfiles(ctx context.Context, f ProfileFilter) ([]User, error) {
-	//the buildWhereClause funciton takes a ProfileFilter struct and uses its values to 
+	//the buildWhereClause funciton takes a ProfileFilter struct and uses its values to
 	//to generate the 'WHERE' section of the Query to the DB
 	//the rest of the function genereates the other sections of the query
 	where, args := buildWhereClause(f)
 	paramCount := len(args) + 1
 
 	var sb strings.Builder
-	sb.WriteString(`SELECT id, name, gender, gender_probability, sample_size, age, age_group, country_id, country_probability, created_at FROM users`)
+	sb.WriteString(`SELECT id, name, gender, gender_probability, age, age_group, country_id, country_probability, created_at FROM users`)
 	sb.WriteString(where)
 	if f.SortBy != "" {
 		sb.WriteString(" ORDER BY " + f.SortBy + " " + f.Order)
@@ -91,7 +91,6 @@ func (q *Queries) GetFilteredProfiles(ctx context.Context, f ProfileFilter) ([]U
 			&i.Name,
 			&i.Gender,
 			&i.GenderProbability,
-			&i.SampleSize,
 			&i.Age,
 			&i.AgeGroup,
 			&i.CountryID,

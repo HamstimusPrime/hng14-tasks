@@ -15,10 +15,10 @@ type User struct {
 	Name               string
 	Gender             string
 	GenderProbability  float64
-	SampleSize         int32
 	Age                int32
+	CountryName        string
 	AgeGroup           string
 	CountryID          string
 	CountryProbability float64
-	CreatedAt          sql.NullTime
+	CreatedAt          sql.NullString
 }
