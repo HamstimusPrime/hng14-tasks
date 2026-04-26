@@ -4,3 +4,5 @@ task_01/task_01.excalidraw
 .DS_Store
 
 task_03/seed_profiles
+
+task_04/sql/schema/007_refresh_tokens.sql
