@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -20,6 +21,7 @@ import (
 
 type apiConfig struct {
 	db                 *database.Queries
+	rawDB              *sql.DB
 	jwtSecret          []byte
 	githubClientID     string
 	githubClientSecret string
@@ -39,6 +41,68 @@ var oauthStates = struct {
 	m map[string]oauthSession
 }{m: make(map[string]oauthSession)}
 
+// corsMiddleware sets permissive CORS headers for all routes.
+func corsMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ipRateLimiter tracks per-IP request timestamps for sliding-window rate limiting.
+type ipRateLimiter struct {
+	sync.Mutex
+	requests map[string][]time.Time
+}
+
+func newIPRateLimiter() *ipRateLimiter {
+	return &ipRateLimiter{requests: make(map[string][]time.Time)}
+}
+
+func (l *ipRateLimiter) allow(ip string, limit int, window time.Duration) bool {
+	l.Lock()
+	defer l.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-window)
+	var recent []time.Time
+	for _, t := range l.requests[ip] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+	if len(recent) >= limit {
+		l.requests[ip] = recent
+		return false
+	}
+	l.requests[ip] = append(recent, now)
+	return true
+}
+
+func rateLimitMiddleware(limiter *ipRateLimiter, limit int, window time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				ip = r.RemoteAddr
+			}
+			if !limiter.allow(ip, limit, window) {
+				w.Header().Set("Retry-After", "60")
+				http.Error(w, `{"status":"error","message":"rate limit exceeded"}`, http.StatusTooManyRequests)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, reading from environment")
@@ -51,23 +115,28 @@ func main() {
 
 	cfg := &apiConfig{
 		db:                 database.New(db),
+		rawDB:              db,
 		jwtSecret:          []byte(mustEnv("JWT_SECRET")),
 		githubClientID:     mustEnv("GITHUB_CLIENT_ID"),
 		githubClientSecret: mustEnv("GITHUB_CLIENT_SECRET"),
 		baseURL:            getEnv("BASE_URL", "http://localhost:8080"),
 	}
 
+	authLimiter := newIPRateLimiter()
+
 	r := chi.NewRouter()
 
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(9 * time.Second))
+	r.Use(corsMiddleware())
 
 	// Public auth routes
-	r.Get("/auth/github", cfg.handlerGitHubLogin)
+	r.With(rateLimitMiddleware(authLimiter, 10, time.Minute)).Get("/auth/github", cfg.handlerGitHubLogin)
 	r.Get("/auth/github/callback", cfg.handlerWebCallback)
 	r.Post("/auth/refresh", cfg.handlerRefresh)
 	r.Post("/auth/logout", cfg.handlerLogout)
+	r.Post("/auth/test/token", cfg.handlerTestToken)
 
 	// Web portal routes
 	r.Get("/web/", cfg.handlerWebRoot)
@@ -75,35 +144,39 @@ func main() {
 	r.Get("/web/dashboard", cfg.handlerWebDashboard)
 	r.Handle("/web/static/*", http.StripPrefix("/web/static/", http.FileServer(http.Dir("web/static"))))
 
-	// Protected API routes — all require a valid JWT
-	r.Group(func(r chi.Router) {
+	// Protected API routes — all require a valid JWT.
+	// Registered under both /api/ (legacy) and /api/v1/ (versioned).
+	registerAPIRoutes := func(r chi.Router) {
 		r.Use(middleware.Authenticate(cfg.jwtSecret))
 
-		// analyst + admin: read-only
+		r.Get("/users/me", cfg.handlerGetCurrentUser)
+
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireRole("admin", "analyst"))
-			r.Get("/api/profiles", func(w http.ResponseWriter, r *http.Request) {
+			r.Get("/profiles", func(w http.ResponseWriter, r *http.Request) {
 				handlerGetProfiles(w, r, cfg.db)
 			})
-			r.Get("/api/profiles/search", func(w http.ResponseWriter, r *http.Request) {
+			r.Get("/profiles/search", func(w http.ResponseWriter, r *http.Request) {
 				handlerNLQsearch(w, r, cfg.db)
 			})
-			r.Get("/api/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
+			r.Get("/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
 				handlerGetProfileWithID(w, r, cfg.db)
 			})
 		})
 
-		// admin only: write operations
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireRole("admin"))
-			r.Post("/api/profiles", func(w http.ResponseWriter, r *http.Request) {
+			r.Post("/profiles", func(w http.ResponseWriter, r *http.Request) {
 				handlerCreateProfile(w, r, cfg.db)
 			})
-			r.Delete("/api/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
+			r.Delete("/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
 				handlerDeleteProfileWithID(w, r, cfg.db)
 			})
 		})
-	})
+	}
+
+	r.Route("/api", registerAPIRoutes)
+	r.Route("/api/v1", registerAPIRoutes)
 
 	port := getEnv("PORT", "8080")
 	fmt.Printf("Server starting on :%s\n", port)

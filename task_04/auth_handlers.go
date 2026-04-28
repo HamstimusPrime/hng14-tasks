@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"hng_task_04/internal/auth"
@@ -23,7 +24,7 @@ import (
 func (cfg *apiConfig) handlerGitHubLogin(w http.ResponseWriter, r *http.Request) {
 	source := r.URL.Query().Get("source")
 
-	if source == "web" {
+	if source == "" || source == "web" {
 		state, err := auth.GenerateRandomHex(32)
 		if err != nil {
 			respondWithError(w, http.StatusInternalServerError, "failed to generate state")
@@ -37,7 +38,7 @@ func (cfg *apiConfig) handlerGitHubLogin(w http.ResponseWriter, r *http.Request)
 		challenge := auth.CodeChallenge(verifier)
 
 		oauthStates.Lock()
-		oauthStates.m[state] = oauthSession{codeVerifier: verifier, createdAt: time.Now()}
+		oauthStates.m[state] = oauthSession{codeVerifier: verifier, createdAt: time.Now(), source: "web"}
 		oauthStates.Unlock()
 
 		redirectURI := cfg.baseURL + "/auth/github/callback"
@@ -227,12 +228,23 @@ func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
 // handlerLogout invalidates the refresh token server-side.
 func (cfg *apiConfig) handlerLogout(w http.ResponseWriter, r *http.Request) {
 	var req LogoutRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
-		hash := hashToken(req.RefreshToken)
-		cfg.db.RevokeRefreshToken(r.Context(), hash)
+	json.NewDecoder(r.Body).Decode(&req)
+
+	// Also accept refresh_token from HttpOnly cookie (web clients).
+	if req.RefreshToken == "" {
+		if cookie, err := r.Cookie("refresh_token"); err == nil {
+			req.RefreshToken = cookie.Value
+		}
 	}
 
-	// Clear web session cookies if present.
+	if req.RefreshToken == "" {
+		respondWithError(w, http.StatusBadRequest, "missing refresh_token")
+		return
+	}
+
+	hash := hashToken(req.RefreshToken)
+	cfg.db.RevokeRefreshToken(r.Context(), hash)
+
 	http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
 	http.SetCookie(w, &http.Cookie{Name: "refresh_token", Value: "", Path: "/auth", MaxAge: -1})
 
@@ -338,4 +350,68 @@ func (cfg *apiConfig) issueTokenPair(ctx context.Context, user database.AuthUser
 func hashToken(raw string) string {
 	h := sha256.Sum256([]byte(raw))
 	return fmt.Sprintf("%x", h)
+}
+
+// handlerTestToken issues a real token pair for a seeded test user. Only
+// available when APP_ENV is not "production". Used by automated test suites
+// that cannot complete a real GitHub OAuth flow.
+func (cfg *apiConfig) handlerTestToken(w http.ResponseWriter, r *http.Request) {
+	if os.Getenv("APP_ENV") == "production" {
+		respondWithError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Role     string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" {
+		respondWithError(w, http.StatusBadRequest, "missing username")
+		return
+	}
+	if req.Role != "admin" && req.Role != "analyst" {
+		respondWithError(w, http.StatusBadRequest, "role must be admin or analyst")
+		return
+	}
+
+	testGithubID := "test_user_" + req.Role
+	dbUser, err := cfg.db.UpsertAuthUser(r.Context(), database.UpsertAuthUserParams{
+		ID:        uuid.Must(uuid.NewV7()),
+		GithubID:  testGithubID,
+		Username:  req.Username,
+		Email:     req.Username + "@test.local",
+		AvatarUrl: "",
+	})
+	if err != nil {
+		log.Printf("test token: upsert user error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to create test user")
+		return
+	}
+
+	// UpsertAuthUser never sets role — update it if needed.
+	if dbUser.Role != req.Role {
+		_, err = cfg.rawDB.ExecContext(r.Context(),
+			"UPDATE auth_users SET role = $1 WHERE github_id = $2",
+			req.Role, testGithubID)
+		if err != nil {
+			log.Printf("test token: role update error: %v", err)
+			respondWithError(w, http.StatusInternalServerError, "failed to set role")
+			return
+		}
+		dbUser.Role = req.Role
+	}
+
+	accessToken, rawRefresh, err := cfg.issueTokenPair(r.Context(), dbUser)
+	if err != nil {
+		log.Printf("test token: issue token pair error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to issue tokens")
+		return
+	}
+
+	respondWithJSON(w, map[string]string{
+		"access_token":  accessToken,
+		"refresh_token": rawRefresh,
+		"username":      dbUser.Username,
+		"role":          dbUser.Role,
+	}, http.StatusOK)
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hng_task_04/internal/database"
+	"hng_task_04/internal/middleware"
 	"log"
 	"net/http"
 	"strings"
@@ -13,6 +14,19 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+func (cfg *apiConfig) handlerGetCurrentUser(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		respondWithError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	respondWithJSON(w, map[string]interface{}{
+		"user_id":  claims.UserID,
+		"username": claims.Username,
+		"role":     claims.Role,
+	}, http.StatusOK)
+}
 
 func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Queries) {
 

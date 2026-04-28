@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hng_task04_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_URL: postgres://postgres:postgres@localhost:5432/hng_task04_test?sslmode=disable
+      JWT_SECRET: ci-test-secret
+      GITHUB_CLIENT_ID: placeholder
+      GITHUB_CLIENT_SECRET: placeholder
+      BASE_URL: http://localhost:8080
+      APP_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: task_04/go.mod
+
+      - name: Vet
+        working-directory: task_04
+        run: go vet ./...
+
+      - name: Build
+        working-directory: task_04
+        run: go build ./...
+
+      - name: Test
+        working-directory: task_04
+        run: go test ./...
