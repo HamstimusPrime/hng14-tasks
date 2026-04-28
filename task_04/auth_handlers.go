@@ -1,0 +1,365 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"log"
+	"net/http"
+	"net/url"
+	"time"
+
+	"hng_task_04/internal/auth"
+	"hng_task_04/internal/database"
+
+	"github.com/google/uuid"
+)
+
+// handlerGitHubLogin builds the GitHub authorization URL and redirects.
+// ?source=web  → server generates state+verifier, stores them, uses backend callback URL.
+// ?source=cli  → CLI provides state, code_challenge, redirect_uri; server just proxies to GitHub.
+func (cfg *apiConfig) handlerGitHubLogin(w http.ResponseWriter, r *http.Request) {
+	source := r.URL.Query().Get("source")
+
+	if source == "web" {
+		state, err := auth.GenerateRandomHex(32)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "failed to generate state")
+			return
+		}
+		verifier, err := auth.GenerateRandomHex(32)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "failed to generate verifier")
+			return
+		}
+		challenge := auth.CodeChallenge(verifier)
+
+		oauthStates.Lock()
+		oauthStates.m[state] = oauthSession{codeVerifier: verifier, createdAt: time.Now()}
+		oauthStates.Unlock()
+
+		redirectURI := cfg.baseURL + "/auth/github/callback"
+		githubURL := fmt.Sprintf(
+			"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&state=%s&code_challenge=%s&code_challenge_method=S256&scope=user:email",
+			url.QueryEscape(cfg.githubClientID),
+			url.QueryEscape(redirectURI),
+			url.QueryEscape(state),
+			url.QueryEscape(challenge),
+		)
+		http.Redirect(w, r, githubURL, http.StatusFound)
+		return
+	}
+
+	// CLI flow: all params are provided by the CLI.
+	state := r.URL.Query().Get("state")
+	codeChallenge := r.URL.Query().Get("code_challenge")
+	redirectURI := r.URL.Query().Get("redirect_uri")
+
+	if state == "" || codeChallenge == "" || redirectURI == "" {
+		respondWithError(w, http.StatusBadRequest, "missing state, code_challenge, or redirect_uri")
+		return
+	}
+
+	githubURL := fmt.Sprintf(
+		"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&state=%s&code_challenge=%s&code_challenge_method=S256&scope=user:email",
+		url.QueryEscape(cfg.githubClientID),
+		url.QueryEscape(redirectURI),
+		url.QueryEscape(state),
+		url.QueryEscape(codeChallenge),
+	)
+	http.Redirect(w, r, githubURL, http.StatusFound)
+}
+
+// handlerWebCallback handles GET /auth/github/callback — the browser redirect from GitHub (web flow).
+func (cfg *apiConfig) handlerWebCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+
+	if code == "" || state == "" {
+		respondWithError(w, http.StatusBadRequest, "missing code or state")
+		return
+	}
+
+	oauthStates.Lock()
+	session, ok := oauthStates.m[state]
+	if ok {
+		delete(oauthStates.m, state)
+	}
+	oauthStates.Unlock()
+
+	if !ok || time.Since(session.createdAt) > 5*time.Minute {
+		respondWithError(w, http.StatusBadRequest, "invalid or expired state")
+		return
+	}
+
+	redirectURI := cfg.baseURL + "/auth/github/callback"
+	ghToken, err := auth.ExchangeCodeForToken(r.Context(), cfg.githubClientID, cfg.githubClientSecret, code, redirectURI, session.codeVerifier)
+	if err != nil {
+		log.Printf("github token exchange error: %v", err)
+		respondWithError(w, http.StatusBadGateway, "failed to exchange code with GitHub")
+		return
+	}
+
+	ghUser, err := auth.FetchGitHubUser(r.Context(), ghToken.AccessToken)
+	if err != nil {
+		log.Printf("github user fetch error: %v", err)
+		respondWithError(w, http.StatusBadGateway, "failed to fetch GitHub user")
+		return
+	}
+
+	dbUser, err := cfg.db.UpsertAuthUser(r.Context(), database.UpsertAuthUserParams{
+		ID:        uuid.Must(uuid.NewV7()),
+		GithubID:  fmt.Sprintf("%d", ghUser.ID),
+		Username:  ghUser.Login,
+		Email:     ghUser.Email,
+		AvatarUrl: ghUser.AvatarURL,
+	})
+	if err != nil {
+		log.Printf("upsert auth user error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	accessToken, rawRefresh, err := cfg.issueTokenPair(r.Context(), dbUser)
+	if err != nil {
+		log.Printf("issue token pair error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to issue tokens")
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    accessToken,
+		Path:     "/",
+		MaxAge:   180,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    rawRefresh,
+		Path:     "/auth",
+		MaxAge:   300,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	http.Redirect(w, r, "/web/dashboard", http.StatusFound)
+}
+
+// handlerCLICallback handles POST /auth/github/callback — CLI sends code+verifier as JSON.
+func (cfg *apiConfig) handlerCLICallback(w http.ResponseWriter, r *http.Request) {
+	var req CLICallbackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Code == "" || req.CodeVerifier == "" || req.RedirectURI == "" {
+		respondWithError(w, http.StatusBadRequest, "missing code, code_verifier, or redirect_uri")
+		return
+	}
+
+	ghToken, err := auth.ExchangeCodeForToken(r.Context(), cfg.githubClientID, cfg.githubClientSecret, req.Code, req.RedirectURI, req.CodeVerifier)
+	if err != nil {
+		log.Printf("github token exchange error (CLI): %v", err)
+		respondWithError(w, http.StatusBadGateway, "failed to exchange code with GitHub")
+		return
+	}
+
+	ghUser, err := auth.FetchGitHubUser(r.Context(), ghToken.AccessToken)
+	if err != nil {
+		log.Printf("github user fetch error (CLI): %v", err)
+		respondWithError(w, http.StatusBadGateway, "failed to fetch GitHub user")
+		return
+	}
+
+	dbUser, err := cfg.db.UpsertAuthUser(r.Context(), database.UpsertAuthUserParams{
+		ID:        uuid.Must(uuid.NewV7()),
+		GithubID:  fmt.Sprintf("%d", ghUser.ID),
+		Username:  ghUser.Login,
+		Email:     ghUser.Email,
+		AvatarUrl: ghUser.AvatarURL,
+	})
+	if err != nil {
+		log.Printf("upsert auth user error (CLI): %v", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	accessToken, rawRefresh, err := cfg.issueTokenPair(r.Context(), dbUser)
+	if err != nil {
+		log.Printf("issue token pair error (CLI): %v", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to issue tokens")
+		return
+	}
+
+	respondWithJSON(w, AuthTokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: rawRefresh,
+		Username:     dbUser.Username,
+		Role:         dbUser.Role,
+	}, http.StatusOK)
+}
+
+// handlerRefresh rotates the refresh token pair.
+func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
+	var req RefreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
+		respondWithError(w, http.StatusBadRequest, "missing refresh_token")
+		return
+	}
+
+	hash := hashToken(req.RefreshToken)
+	storedToken, err := cfg.db.GetRefreshToken(r.Context(), hash)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+		return
+	}
+
+	if err := cfg.db.RevokeRefreshToken(r.Context(), hash); err != nil {
+		log.Printf("revoke refresh token error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to revoke token")
+		return
+	}
+
+	dbUser, err := cfg.db.GetAuthUserByID(r.Context(), storedToken.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "user not found")
+		return
+	}
+	if !dbUser.IsActive {
+		respondWithError(w, http.StatusForbidden, "account is deactivated")
+		return
+	}
+
+	accessToken, rawRefresh, err := cfg.issueTokenPair(r.Context(), dbUser)
+	if err != nil {
+		log.Printf("issue token pair error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "failed to issue tokens")
+		return
+	}
+
+	respondWithJSON(w, map[string]string{
+		"status":        "success",
+		"access_token":  accessToken,
+		"refresh_token": rawRefresh,
+	}, http.StatusOK)
+}
+
+// handlerLogout invalidates the refresh token server-side.
+func (cfg *apiConfig) handlerLogout(w http.ResponseWriter, r *http.Request) {
+	var req LogoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
+		hash := hashToken(req.RefreshToken)
+		cfg.db.RevokeRefreshToken(r.Context(), hash)
+	}
+
+	// Clear web session cookies if present.
+	http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "refresh_token", Value: "", Path: "/auth", MaxAge: -1})
+
+	respondWithJSON(w, map[string]string{"status": "success"}, http.StatusOK)
+}
+
+// --- Web portal handlers ---
+
+// handlerWebRoot redirects to dashboard or login depending on session cookie.
+func (cfg *apiConfig) handlerWebRoot(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie("session"); err == nil && cookie.Value != "" {
+		if _, err := auth.ParseAccessToken(cookie.Value, cfg.jwtSecret); err == nil {
+			http.Redirect(w, r, "/web/dashboard", http.StatusFound)
+			return
+		}
+	}
+	http.Redirect(w, r, "/web/login", http.StatusFound)
+}
+
+// handlerWebLogin renders the login page.
+func (cfg *apiConfig) handlerWebLogin(w http.ResponseWriter, r *http.Request) {
+	tmpl, err := template.ParseFiles("web/templates/layout.html", "web/templates/login.html")
+	if err != nil {
+		log.Printf("template parse error: %v", err)
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	tmpl.ExecuteTemplate(w, "layout", nil)
+}
+
+type dashboardData struct {
+	Username string
+	Role     string
+	IsAdmin  bool
+	Profiles []database.User
+}
+
+// handlerWebDashboard renders the dashboard (requires valid session cookie).
+func (cfg *apiConfig) handlerWebDashboard(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session")
+	if err != nil || cookie.Value == "" {
+		http.Redirect(w, r, "/web/login", http.StatusFound)
+		return
+	}
+	claims, err := auth.ParseAccessToken(cookie.Value, cfg.jwtSecret)
+	if err != nil {
+		http.Redirect(w, r, "/web/login", http.StatusFound)
+		return
+	}
+	if !claims.IsActive {
+		http.Error(w, "account deactivated", http.StatusForbidden)
+		return
+	}
+
+	profiles, err := cfg.db.GetFilteredProfiles(r.Context(), database.ProfileFilter{
+		Limit:  20,
+		Offset: 0,
+		Order:  "ASC",
+	})
+	if err != nil {
+		log.Printf("dashboard fetch profiles error: %v", err)
+		profiles = nil
+	}
+
+	data := dashboardData{
+		Username: claims.Username,
+		Role:     claims.Role,
+		IsAdmin:  claims.Role == "admin",
+		Profiles: profiles,
+	}
+
+	tmpl, err := template.ParseFiles("web/templates/layout.html", "web/templates/dashboard.html")
+	if err != nil {
+		log.Printf("template parse error: %v", err)
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	tmpl.ExecuteTemplate(w, "layout", data)
+}
+
+// --- helpers ---
+
+// issueTokenPair mints a new access token and opaque refresh token, storing the hash in DB.
+func (cfg *apiConfig) issueTokenPair(ctx context.Context, user database.AuthUser) (accessToken, rawRefresh string, err error) {
+	accessToken, err = auth.MintAccessToken(user.ID, user.Username, user.Role, user.IsActive, cfg.jwtSecret)
+	if err != nil {
+		return
+	}
+	rawRefresh, err = auth.GenerateRandomHex(32)
+	if err != nil {
+		return
+	}
+	hash := hashToken(rawRefresh)
+	_, err = cfg.db.CreateRefreshToken(ctx, database.CreateRefreshTokenParams{
+		UserID:    user.ID,
+		TokenHash: hash,
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	})
+	return
+}
+
+// hashToken returns the SHA-256 hex digest of the raw token string.
+func hashToken(raw string) string {
+	h := sha256.Sum256([]byte(raw))
+	return fmt.Sprintf("%x", h)
+}

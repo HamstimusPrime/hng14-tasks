@@ -1,0 +1,145 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f6fa;
+    color: #333;
+    min-height: 100vh;
+}
+
+/* Login */
+.login-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+}
+.login-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 48px 40px;
+    text-align: center;
+    box-shadow: 0 4px 24px rgba(0,0,0,.08);
+    width: 100%;
+    max-width: 380px;
+}
+.login-card h1 { font-size: 1.75rem; margin-bottom: 6px; }
+.tagline { color: #666; margin-bottom: 32px; font-size: .95rem; }
+.btn-github {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: #24292e;
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 500;
+    transition: background .2s;
+}
+.btn-github:hover { background: #3a3f45; }
+
+/* Navbar */
+.navbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #fff;
+    padding: 14px 32px;
+    border-bottom: 1px solid #e8e8e8;
+}
+.brand { font-weight: 700; font-size: 1.1rem; }
+.user-info { display: flex; align-items: center; gap: 12px; }
+.role-badge {
+    font-size: .75rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+.role-badge.admin { background: #fef3c7; color: #92400e; }
+.role-badge.analyst { background: #e0f2fe; color: #075985; }
+
+/* Dashboard */
+.dashboard { padding: 32px; max-width: 1100px; margin: 0 auto; }
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+.section-header h2 { font-size: 1.25rem; }
+
+.create-form {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    background: #fff;
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid #e8e8e8;
+}
+.create-form input {
+    flex: 1;
+    padding: 9px 14px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: .95rem;
+}
+
+.profiles-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 6px rgba(0,0,0,.06);
+}
+.profiles-table th, .profiles-table td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: .9rem;
+}
+.profiles-table th { background: #fafafa; font-weight: 600; color: #555; }
+.profiles-table tbody tr:hover { background: #fafbff; }
+
+/* Buttons */
+.btn-primary {
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    padding: 9px 18px;
+    border-radius: 6px;
+    font-size: .9rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: background .2s;
+}
+.btn-primary:hover { background: #1d4ed8; }
+
+.btn-danger {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 5px;
+    font-size: .85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .2s;
+}
+.btn-danger:hover { background: #fecaca; }
+
+.btn-logout {
+    background: transparent;
+    border: 1px solid #ddd;
+    padding: 6px 14px;
+    border-radius: 5px;
+    font-size: .85rem;
+    cursor: pointer;
+    transition: background .2s;
+}
+.btn-logout:hover { background: #f5f5f5; }

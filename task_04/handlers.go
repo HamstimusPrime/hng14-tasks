@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -137,7 +138,7 @@ func handlerCreateProfile(w http.ResponseWriter, r *http.Request, q *database.Qu
 
 func handlerGetProfileWithID(w http.ResponseWriter, r *http.Request, q *database.Queries) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	userInput := r.PathValue("id")
+	userInput := chi.URLParam(r, "id")
 	id, err := uuid.Parse(userInput)
 	if err != nil {
 		log.Printf("error, ID: %v is not a valid UUID", userInput)
@@ -276,7 +277,7 @@ func handlerGetProfiles(w http.ResponseWriter, r *http.Request, q *database.Quer
 
 func handlerDeleteProfileWithID(w http.ResponseWriter, r *http.Request, q *database.Queries) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	userInput := r.PathValue("id")
+	userInput := chi.URLParam(r, "id")
 	id, err := uuid.Parse(userInput)
 	if err != nil {
 		errorMsg := fmt.Sprintf("error, ID: %v is not a valid UUID", userInput)
