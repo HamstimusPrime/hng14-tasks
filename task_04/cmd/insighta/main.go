@@ -16,8 +16,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"hng_task_04/internal/auth"
 )
 
 const (
@@ -33,7 +31,7 @@ type storedTokens struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		printUsage()
+		printCmdHelp()
 		os.Exit(1)
 	}
 
@@ -49,7 +47,7 @@ func main() {
 		err = cmdSearch(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		printUsage()
+		printCmdHelp()
 		os.Exit(1)
 	}
 
@@ -60,116 +58,94 @@ func main() {
 }
 
 func cmdLogin() error {
-	// 1. Generate state and code_verifier (32 random bytes each → 64-char hex strings)
+	// 1. Generate state (CSRF token); verifier is generated server-side.
+	//256 bit random value encoded to a 64char hex string
 	stateBytes := make([]byte, 32)
 	if _, err := rand.Read(stateBytes); err != nil {
 		return fmt.Errorf("failed to generate state: %w", err)
 	}
 	state := hex.EncodeToString(stateBytes)
 
-	codeVerifier, err := auth.GenerateRandomHex(32)
-	if err != nil {
-		return fmt.Errorf("failed to generate code_verifier: %w", err)
-	}
-
-	// 2. Derive code_challenge
-	codeChallenge := auth.CodeChallenge(codeVerifier)
-
-	// 3. Start a local callback server on a fixed port so it matches the
-	//    registered callback URL in the GitHub OAuth app settings.
+	// 2. Start local listener; Github server will redirect the browser here with tokens.
 	const callbackPort = 8085
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", callbackPort))
 	if err != nil {
-		return fmt.Errorf("failed to start local server on port %d (is another insighta login already running?): %w", callbackPort, err)
+		return fmt.Errorf("failed to start local server on port %d (check if another insighta login instance is already running?): %w", callbackPort, err)
 	}
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", callbackPort)
 
-	codeCh := make(chan string, 1)
-	stateCh := make(chan string, 1)
-	errCh := make(chan error, 1)
+	type callbackResult struct {
+		accessToken  string
+		refreshToken string
+		username     string
+		err          error
+		state        string
+	}
+	resultCh := make(chan callbackResult, 1)
 
-	mux := http.NewServeMux()
-	srv := &http.Server{Handler: mux}
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	callBackMux := http.NewServeMux()
+	callBackSrv := &http.Server{Handler: callBackMux}
+	callBackMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if errParam := r.URL.Query().Get("error"); errParam != "" {
-			errCh <- fmt.Errorf("github oauth error: %s", errParam)
+			resultCh <- callbackResult{err: fmt.Errorf("github oauth error: %s", errParam)}
 			fmt.Fprint(w, "<html><body>Authorization failed. You may close this tab.</body></html>")
-			go srv.Shutdown(context.Background())
+			go callBackSrv.Shutdown(context.Background())
 			return
 		}
-		codeCh <- r.URL.Query().Get("code")
-		stateCh <- r.URL.Query().Get("state")
+		resultCh <- callbackResult{
+			accessToken:  r.URL.Query().Get("access_token"),
+			refreshToken: r.URL.Query().Get("refresh_token"),
+			username:     r.URL.Query().Get("username"),
+			state:        r.URL.Query().Get("state"),
+		}
 		fmt.Fprint(w, "<html><body><h2>Authorization successful!</h2><p>You may close this tab.</p></body></html>")
-		go srv.Shutdown(context.Background())
+		go callBackSrv.Shutdown(context.Background())
 	})
-	go srv.Serve(listener)
+	go callBackSrv.Serve(listener)
 
-	// 4. Build the authorization URL via the backend (which proxies to GitHub)
+	// 3. Build Github auth URL, include the
+	// CSRF token(state) and make a request to
+	// the Github URL in the browser.
 	apiBase := getEnv("INSIGHTA_API", defaultBackend)
 	authURL := fmt.Sprintf(
-		"%s/auth/github?source=cli&state=%s&code_challenge=%s&code_challenge_method=S256&redirect_uri=%s",
+		"%s/auth/github?source=cli&state=%s&callback_port=%d",
 		apiBase,
 		url.QueryEscape(state),
-		url.QueryEscape(codeChallenge),
-		url.QueryEscape(redirectURI),
+		callbackPort,
 	)
-
-	// 5. Open the browser
 	fmt.Println("Opening browser for GitHub login...")
 	openBrowser(authURL)
 
-	// 6. Wait for the callback (2-minute timeout)
+	// 4. Wait for the server redirect (2-minute timeout).
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	var receivedCode, receivedState string
+	var res callbackResult
+	//setup an async situation where 
 	select {
-	case receivedCode = <-codeCh:
-		receivedState = <-stateCh
-	case err := <-errCh:
-		return err
+	case res = <-resultCh:
 	case <-ctx.Done():
-		return fmt.Errorf("login timed out — no response from GitHub after 2 minutes")
+		return fmt.Errorf("login timed out — no response after 2 minutes")
 	}
 
-	// 7. Validate state to prevent CSRF
-	if receivedState != state {
+	if res.err != nil {
+		return res.err
+	}
+	if res.state != state {
 		return fmt.Errorf("state mismatch: possible CSRF attack, aborting")
 	}
-
-	// 8. POST code + code_verifier to backend
-	payload, _ := json.Marshal(map[string]string{
-		"code":          receivedCode,
-		"code_verifier": codeVerifier,
-		"redirect_uri":  redirectURI,
-	})
-	resp, err := http.Post(apiBase+"/auth/github/callback", "application/json", bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("failed to exchange code with backend: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("backend returned HTTP %d during token exchange", resp.StatusCode)
+	if res.accessToken == "" {
+		return fmt.Errorf("no access token received from server")
 	}
 
-	// 9. Parse and store tokens
-	var tokens struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		Username     string `json:"username"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokens); err != nil {
-		return fmt.Errorf("failed to parse token response: %w", err)
-	}
 	if err := saveTokens(storedTokens{
-		AccessToken:  tokens.AccessToken,
-		RefreshToken: tokens.RefreshToken,
-		Username:     tokens.Username,
+		AccessToken:  res.accessToken,
+		RefreshToken: res.refreshToken,
+		Username:     res.username,
 	}); err != nil {
 		return fmt.Errorf("failed to save tokens: %w", err)
 	}
 
-	fmt.Printf("Logged in as @%s\n", tokens.Username)
+	fmt.Printf("Logged in as @%s\n", res.username)
 	return nil
 }
 
@@ -325,6 +301,9 @@ func printJSON(resp *http.Response) error {
 }
 
 func openBrowser(u string) {
+	//use runtime.GOOS to get the native Operating
+	//system the program is running on. in order
+	//to select what command to launch browser
 	var cmd string
 	switch runtime.GOOS {
 	case "darwin":
@@ -345,7 +324,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func printUsage() {
+func printCmdHelp() {
 	fmt.Print(`insighta — Insighta Labs+ CLI
 
 Usage:

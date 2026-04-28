@@ -52,22 +52,37 @@ func (cfg *apiConfig) handlerGitHubLogin(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// CLI flow: all params are provided by the CLI.
+	// CLI flow: CLI supplies state (CSRF) and callback_port; server generates verifier.
 	state := r.URL.Query().Get("state")
-	codeChallenge := r.URL.Query().Get("code_challenge")
-	redirectURI := r.URL.Query().Get("redirect_uri")
-
-	if state == "" || codeChallenge == "" || redirectURI == "" {
-		respondWithError(w, http.StatusBadRequest, "missing state, code_challenge, or redirect_uri")
+	callbackPort := r.URL.Query().Get("callback_port")
+	if state == "" || callbackPort == "" {
+		respondWithError(w, http.StatusBadRequest, "missing state or callback_port")
 		return
 	}
 
+	verifier, err := auth.GenerateRandomHex(32)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "failed to generate verifier")
+		return
+	}
+	challenge := auth.CodeChallenge(verifier)
+
+	oauthStates.Lock()
+	oauthStates.m[state] = oauthSession{
+		codeVerifier: verifier,
+		createdAt:    time.Now(),
+		source:       "cli",
+		callbackPort: callbackPort,
+	}
+	oauthStates.Unlock()
+
+	redirectURI := cfg.baseURL + "/auth/github/callback"
 	githubURL := fmt.Sprintf(
 		"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&state=%s&code_challenge=%s&code_challenge_method=S256&scope=user:email",
 		url.QueryEscape(cfg.githubClientID),
 		url.QueryEscape(redirectURI),
 		url.QueryEscape(state),
-		url.QueryEscape(codeChallenge),
+		url.QueryEscape(challenge),
 	)
 	http.Redirect(w, r, githubURL, http.StatusFound)
 }
@@ -129,6 +144,20 @@ func (cfg *apiConfig) handlerWebCallback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if session.source == "cli" {
+		cliURL := fmt.Sprintf(
+			"http://localhost:%s/?access_token=%s&refresh_token=%s&username=%s&role=%s&state=%s",
+			session.callbackPort,
+			url.QueryEscape(accessToken),
+			url.QueryEscape(rawRefresh),
+			url.QueryEscape(dbUser.Username),
+			url.QueryEscape(dbUser.Role),
+			url.QueryEscape(state),
+		)
+		http.Redirect(w, r, cliURL, http.StatusFound)
+		return
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    accessToken,
@@ -149,59 +178,6 @@ func (cfg *apiConfig) handlerWebCallback(w http.ResponseWriter, r *http.Request)
 	http.Redirect(w, r, "/web/dashboard", http.StatusFound)
 }
 
-// handlerCLICallback handles POST /auth/github/callback — CLI sends code+verifier as JSON.
-func (cfg *apiConfig) handlerCLICallback(w http.ResponseWriter, r *http.Request) {
-	var req CLICallbackRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Code == "" || req.CodeVerifier == "" || req.RedirectURI == "" {
-		respondWithError(w, http.StatusBadRequest, "missing code, code_verifier, or redirect_uri")
-		return
-	}
-
-	ghToken, err := auth.ExchangeCodeForToken(r.Context(), cfg.githubClientID, cfg.githubClientSecret, req.Code, req.RedirectURI, req.CodeVerifier)
-	if err != nil {
-		log.Printf("github token exchange error (CLI): %v", err)
-		respondWithError(w, http.StatusBadGateway, "failed to exchange code with GitHub")
-		return
-	}
-
-	ghUser, err := auth.FetchGitHubUser(r.Context(), ghToken.AccessToken)
-	if err != nil {
-		log.Printf("github user fetch error (CLI): %v", err)
-		respondWithError(w, http.StatusBadGateway, "failed to fetch GitHub user")
-		return
-	}
-
-	dbUser, err := cfg.db.UpsertAuthUser(r.Context(), database.UpsertAuthUserParams{
-		ID:        uuid.Must(uuid.NewV7()),
-		GithubID:  fmt.Sprintf("%d", ghUser.ID),
-		Username:  ghUser.Login,
-		Email:     ghUser.Email,
-		AvatarUrl: ghUser.AvatarURL,
-	})
-	if err != nil {
-		log.Printf("upsert auth user error (CLI): %v", err)
-		respondWithError(w, http.StatusInternalServerError, "failed to create user")
-		return
-	}
-
-	accessToken, rawRefresh, err := cfg.issueTokenPair(r.Context(), dbUser)
-	if err != nil {
-		log.Printf("issue token pair error (CLI): %v", err)
-		respondWithError(w, http.StatusInternalServerError, "failed to issue tokens")
-		return
-	}
-
-	respondWithJSON(w, AuthTokenResponse{
-		AccessToken:  accessToken,
-		RefreshToken: rawRefresh,
-		Username:     dbUser.Username,
-		Role:         dbUser.Role,
-	}, http.StatusOK)
-}
 
 // handlerRefresh rotates the refresh token pair.
 func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {

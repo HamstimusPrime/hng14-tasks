@@ -93,9 +93,3 @@ type RefreshRequest struct {
 type LogoutRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
-
-type CLICallbackRequest struct {
-	Code         string `json:"code"`
-	CodeVerifier string `json:"code_verifier"`
-	RedirectURI  string `json:"redirect_uri"`
-}

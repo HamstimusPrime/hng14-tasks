@@ -29,6 +29,8 @@ type apiConfig struct {
 type oauthSession struct {
 	codeVerifier string
 	createdAt    time.Time
+	source       string // "web" or "cli"
+	callbackPort string // only set for CLI flow
 }
 
 // oauthStates holds in-flight web OAuth sessions keyed by state string.
@@ -64,7 +66,6 @@ func main() {
 	// Public auth routes
 	r.Get("/auth/github", cfg.handlerGitHubLogin)
 	r.Get("/auth/github/callback", cfg.handlerWebCallback)
-	r.Post("/auth/github/callback", cfg.handlerCLICallback)
 	r.Post("/auth/refresh", cfg.handlerRefresh)
 	r.Post("/auth/logout", cfg.handlerLogout)
 
