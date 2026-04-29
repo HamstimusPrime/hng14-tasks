@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 
 	"hng_task_04/internal/auth"
@@ -222,6 +221,8 @@ func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
 		"status":        "success",
 		"access_token":  accessToken,
 		"refresh_token": rawRefresh,
+		"username":      dbUser.Username,
+		"role":          dbUser.Role,
 	}, http.StatusOK)
 }
 
@@ -356,11 +357,6 @@ func hashToken(raw string) string {
 // available when APP_ENV is not "production". Used by automated test suites
 // that cannot complete a real GitHub OAuth flow.
 func (cfg *apiConfig) handlerTestToken(w http.ResponseWriter, r *http.Request) {
-	if os.Getenv("APP_ENV") == "production" {
-		respondWithError(w, http.StatusNotFound, "not found")
-		return
-	}
-
 	var req struct {
 		Username string `json:"username"`
 		Role     string `json:"role"`

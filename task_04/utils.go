@@ -19,12 +19,11 @@ var GENDERIZE_API_URL string = "https://api.genderize.io/"
 var NATIONALIZE_API_URL string = "https://api.nationalize.io/"
 
 func respondWithError(w http.ResponseWriter, statusCode int, errMsg string) {
-	w.WriteHeader(statusCode)
 	errObj := ErrorObject{Status: "error", Message: errMsg}
 	errJSON, _ := json.Marshal(errObj)
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
 	w.Write(errJSON)
-	return
 }
 
 func respondWithJSON(w http.ResponseWriter, resTemplate interface{}, HTTPstatus int) {
@@ -32,7 +31,7 @@ func respondWithJSON(w http.ResponseWriter, resTemplate interface{}, HTTPstatus 
 	if err != nil {
 		log.Fatal("unable to parse response JSON")
 	}
-	w.Header().Set("Content-Type", "json/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(HTTPstatus)
 	w.Write([]byte(resJSON))
 }

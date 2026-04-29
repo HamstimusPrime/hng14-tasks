@@ -19,20 +19,23 @@ func ClaimsFromContext(ctx context.Context) *auth.Claims {
 	return c
 }
 
-// Authenticate validates the Bearer JWT and injects claims into context.
+// Authenticate validates the Bearer JWT (or session cookie fallback) and injects claims into context.
 // Returns 401 on missing/invalid token, 403 if the account is inactive.
 func Authenticate(jwtSecret []byte) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			header := r.Header.Get("Authorization")
-			if !strings.HasPrefix(header, "Bearer ") {
+			var tokenStr string
+			if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+				tokenStr = strings.TrimPrefix(header, "Bearer ")
+			} else if cookie, err := r.Cookie("session"); err == nil && cookie.Value != "" {
+				tokenStr = cookie.Value
+			} else {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{
 					"status":  "error",
 					"message": "missing or malformed Authorization header",
 				})
 				return
 			}
-			tokenStr := strings.TrimPrefix(header, "Bearer ")
 			claims, err := auth.ParseAccessToken(tokenStr, jwtSecret)
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{
